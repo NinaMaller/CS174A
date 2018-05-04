@@ -1,0 +1,1149 @@
+<!-- Graphics Example Code.  index.html - The web page document containing the canvas (drawing surface), that launches your javascript files.  By Garett //-->
+<!DOCTYPE html> <html> <head> <meta charset="UTF-8"/> <link rel="icon" href="assets/fav.ico">
+<script type="text/javascript" src="tinywebgl-ucla.js" ></script>  <!--  Javascript "include" files.  Any code in them gets executed as part of the page loading. //-->
+<script type="text/javascript" src="dependencies.js"   ></script>
+<script type="text/javascript"> "use strict"    
+  window.onload = function init()        // ********************* THE ENTRY POINT OF THE WHOLE PROGRAM STARTS HERE ********************* 
+    { window.contexts = {};                                                            // A global variable, "contexts".  Browsers support up to 16 WebGL contexts per page.
+      
+      const scenes  = [ "Tutorial_Animation", "Movement_Controls", "Global_Info_Table" ]; // Register some scenes to the "Canvas_Manager" object -- which WebGL calls
+                                                                                       // upon every time a draw / keyboard / mouse event happens.  
+      
+      if( eval( "typeof " + scenes[0] ) !== "undefined" )
+      { document.getElementById( "canvases" ).appendChild( Object.assign( document.createElement( "canvas" ), { id: "main_canvas", width: 800, height: 600 } ) );
+        contexts[ "main_canvas" ] = new Canvas_Manager( "main_canvas", Color.of( 0,0,255,0.9), scenes );   // Manage the WebGL canvas.  Second parameter sets background color.
+        for( let c in contexts ) contexts[ c ].render();     // Call render() for each WebGL context on this page.  Then render() will re-queue itself for more calls.
+        
+        Code_Manager.display_code( eval( scenes[0] ) );                                  // Display the code for our demo on the page, starting with the first scene in the list.
+        for( let list of [ core_dependencies, all_dependencies ] )
+        document.querySelector( "#class_list" ).rows[2].appendChild( Object.assign( document.createElement( "td" ), { 
+          innerHTML: list.reduce( (acc, x) => acc += "<a href='javascript:void(0);' onclick='Code_Manaager.display_code(" + x + ")'>" + x + "</a><br>", "" ) } ) );        
+        document.getElementsByName( "main_demo_link" )[0].innerHTML = "<a href='javascript:void(0);' onclick='Code_Manager.display_code(" + scenes[0] + ")'>" + scenes[0] + "</a><br>";
+        document.querySelector("#code_display").innerHTML = "Below is the code for the demo that's running:<br>&nbsp;<br>" + document.querySelector("#code_display").innerHTML;             
+      }
+
+//music
+     var audio = new Audio('Recording.mp3');
+     audio.play();
+
+      
+      document.querySelector("#edit_button").addEventListener('click', () => {
+        code_panel.style.display=class_list.style.display='none'; new_demo_source_code.style.display='block'; 
+        document.getElementsByName( 'new_demo_code' )[0].value=code_display.dataset.displayed.toString() } )
+      const form = document.forms.namedItem("new_demo_source_code");
+      form.addEventListener('submit', function(event) 
+        { if( document.getElementsByName( "finished" )[0].checked )
+            alert( "Your demo will be submitted.  If approved, you will start being asked for a password to make any further updates to it.  This password "
+                 + "will appear right now, below the submit button, and then (assuming submission worked) it will never appear again.  Write it down." );
+          var xhr = new XMLHttpRequest();
+          xhr.open("POST", "/submit-demo?Unapproved", true);
+          xhr.responseType = "json";
+          xhr.onload = function(event) 
+          { if (xhr.status != 200) { document.querySelector("#submit_result").textContent = "Error " + xhr.status + " when trying to upload."; return }
+            document.querySelector("#submit_result").textContent = this.response.message;
+            // if( this.response.hide_finished_checkbox ) { document.getElementsByName( "finished" )[0].checked = false; expert_panel.style.display = "none" }
+            if( this.response.show_password  ) document.getElementsByName( "password" )[0] .style.display = "inline";
+            if( this.response.show_overwrite ) document.querySelector( "#overwrite_panel" ).style.display = "inline";
+          };
+          xhr.setRequestHeader("Content-Type", "application/json");
+          xhr.send( JSON.stringify( Array.from( form.elements ).reduce( ( accum, elem ) => 
+            { if( elem.value && !( ['checkbox', 'radio'].includes(elem.type) && !elem.checked ) ) accum[elem.name] = elem.value; return accum }, {} ) ) );
+          event.preventDefault();
+        }, false);      
+    }
+
+// Below is the demo you will see when you run the program!    
+  
+class Tutorial_Animation extends Scene_Component  // An example of a Scene_Component that our class Canvas_Manager can manage.  Like most, this one draws 3D shapes.
+{ constructor( context )
+    { super( context );
+
+      var shapes = { 'triangle'        : new Triangle(),                            // At the beginning of our program, instantiate all shapes we plan to use,
+            	       'pyramid'         : new Pyramid(),
+                     'strip'           : new Square(),                              // each with only one instance in the graphics card's memory.
+                     'bad_tetrahedron' : new Tetrahedron( false ),                  // For example we would only create one "cube" blueprint in the GPU, but then 
+                  //   'pyramidone' 	   : new Lena(),
+                     'tetrahedron'     : new Tetrahedron( true ),                   // re-use it many times per call to display to get multiple cubes in the scene.
+                     'cube'            : new Cube(), 
+                     'coral'		   : new Shape_From_File( "/assets/tubep.obj" ),
+                     'weed'		  	   : new Shape_From_File( "/assets/Seaweed.obj" ),
+                     'grass'		  	   : new Shape_From_File( "/assets/grass.obj" ),
+                     'sphere'          : new Subdivision_Sphere(5), // 5 subdivisions
+                     'windmill'        : new Windmill( 10 )
+                    };
+      this.submit_shapes( context, shapes );
+      
+       // Place the camera, which is stored in a scratchpad for globals.  Secondly, setup the projection:  The matrix that determines how depth is treated.  It projects 3D points onto a plane.
+      Object.assign( context.globals.graphics_state, { camera_transform: Mat4.translation([ 0, 0,-25 ]), projection_transform: Mat4.perspective( Math.PI/4, context.width/context.height, .1, 1000 ) } );
+      
+      // *** Materials: *** Declare new ones as temps when needed; they're just cheap wrappers for some numbers.  1st parameter:  Color (4 floats in RGBA format),
+      // 2nd: Ambient light, 3rd: Diffuse reflectivity, 4th: Specular reflectivity, 5th: Smoothness exponent, 6th: Optional texture object, leave off for un-textured.
+      Object.assign( this, { purplePlastic: context.get_instance( Phong_Model  ).material( Color.of( .9,.5,.9, 1 ), .4, .4, .8, 40 ),
+                             greyPlastic  : context.get_instance( Phong_Model  ).material( Color.of( .5,.5,.5, 1 ), .4, .8, .4, 20 ),   // Smaller exponent means 
+                             blueGlass    : context.get_instance( Phong_Model  ).material( Color.of( .5,.5, 1,.2 ), 1, 1, 1, 40 ),   // a bigger shiny spot.
+                             ocean        : context.get_instance( Phong_Model  ).material( Color.of( .030, .144, .255, 1 ), .4, .8, .4, 40 ), 
+                             blueBubble   : context.get_instance( Phong_Model  ).material( Color.of( 0,.191, .255,0.2 ), .4, .8, .4, 40 ),
+                             black        : context.get_instance( Phong_Model  ).material( Color.of( 0,0, 0,1 ), .4, .8, .4, 40 ),
+                             white        : context.get_instance( Phong_Model  ).material( Color.of( 1,1, 1,1 ), .4, .8, .4, 40 ),
+                             blue         : context.get_instance( Phong_Model  ).material( Color.of( 0,0, 0.255, 1 ), .4, .8, .4, 40 ),
+                             fire         : context.get_instance( Funny_Shader ).material(),
+                             scuba_suit   : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,1 ), 1, 0, 0, 40, context.get_instance( "assets/scubasuit.jpg")),
+                             pink_scuba_suit   : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,1 ), 1, 0, 0, 40, context.get_instance( "assets/pink_scuba.jpg")),
+                             pink_coral   : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,1 ), 1, 0, 0, 40, context.get_instance( "assets/ep.jpg")),
+                             green_weed   : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,1 ), 1, 0, 0, 40, context.get_instance( "assets/Weed.png")),
+                             orange_weed  : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,1 ), 1, 0, 0, 40, context.get_instance( "assets/model0.png")),
+                             body         : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,1 ), 1, 0, 0, 40, context.get_instance( "assets/body.jpg")),
+                             water        : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,1 ), 1, 0, 0, 40, context.get_instance( "assets/Water-Texture-1.jpg")),
+                             bubble        : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,0 ), 0.8, 0.8, .8, 40, context.get_instance( "assets/bluecolor.jpg")),
+                             scuba_sleeve : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,1 ), 1, 0, 0, 40, context.get_instance( "assets/scubasleeve.jpg" )),
+                             sand         : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,1 ), .5, .5, .5, 40, context.get_instance( "assets/sand1.jpg" )),
+                             puffer       : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,1 ), 1, 0, 0, 40, context.get_instance( "assets/puffer.jpg" )),
+                             puffer_fin   : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,0.5 ), 0.4, .1, .1, 20, context.get_instance( "assets/puffer.jpg" )),
+                            // ocean        : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0.255,1 ), .5, .5, .5, 40, context.get_instance( "assets/sand1.jpg" ) ) ,  
+                             crab        : context.get_instance( Phong_Model  ).material( Color.of( 0.255,0.069,0,1 ), .5, .5, .5, 40, context.get_instance( "assets/crabTe.jpg" ) ) } );                             
+    }
+
+
+  draw_bubble(graphics_state, model_transform, num){
+         
+     // the rate in which in goes up has to be related to its size -- the smaler the bubble, the faster it goes
+
+     //generate a random number between 0.2 and 1 for the size
+     // range k to l
+ //     let size = Math.random(); // number between 0 and 0.9999
+  let size = num;
+      //let size = 1;
+     //let speed be the inverse of size
+     let speed = (1/size) * this.t;
+
+
+     model_transform = model_transform.times(Mat4.translation([ 0,speed * 5 ,0]));
+
+     model_transform = model_transform.times(Mat4.scale([size,size,size]));
+
+     this.shapes.sphere.draw(graphics_state, model_transform , this.bubble);
+
+  }
+  
+
+  draw_arms_by_body(matrix_stack, graphics_state, model_transform){   //draw arms
+     //return to center of body
+     model_transform = matrix_stack.pop();
+     matrix_stack.push(model_transform);
+     model_transform = model_transform.times(Mat4.translation( [ 1.2,2.5 ,0 ]));
+  //   model_transform = model_transform.times(Mat4.rotation( -180 * Math.PI / 180, Vec.of(1,0,0))); // rotate arm up
+     model_transform = model_transform.times(Mat4.translation( [ 0.4,- 0.4,0 ]));
+     model_transform = model_transform.times(Mat4.scale( [ 0.5,0.5,0.5 ]));
+     this.shapes.sphere.draw(graphics_state, model_transform, this.scuba_sleeve); //draw shoulder
+     model_transform = model_transform.times(Mat4.rotation( -70 * Math.PI / 180, Vec.of(0,0,1)));
+     model_transform = model_transform.times(Mat4.scale( [ 2,2,2 ])); //scale back
+     model_transform = model_transform.times(Mat4.translation( [ 0.2 + 1.7 ,0,0 ])); //1.7 is arm length along x
+     model_transform = model_transform.times(Mat4.scale( [ 1.7,0.4,0.4 ])); //draw upper arm
+     this.shapes.cube.draw(graphics_state, model_transform , this.scuba_sleeve);
+
+     model_transform = model_transform.times(Mat4.scale( [ 1/1.7,1/0.4,1/0.4 ])); //scale back
+     model_transform = model_transform.times(Mat4.translation( [1.7 + 0.1,0,0]));
+     model_transform = model_transform.times(Mat4.scale( [0.43,0.43,0.43] ));
+     this.shapes.sphere.draw(graphics_state, model_transform, this.scuba_sleeve);
+     model_transform = model_transform.times(Mat4.scale( [1/0.43,1/0.43,1/0.43] )); //scale back
+     model_transform = model_transform.times(Mat4.rotation( -40 * Math.PI / 180, Vec.of(0,0,1)));
+     model_transform = model_transform.times(Mat4.translation( [1.2+0.43,0,0])); // center of arm
+     model_transform = model_transform.times(Mat4.scale( [1.4,0.4,0.4] ));
+     this.shapes.cube.draw(graphics_state, model_transform, this.scuba_sleeve);
+
+     //draw other arm
+     model_transform = matrix_stack.pop();
+     matrix_stack.push(model_transform);
+     model_transform = model_transform.times(Mat4.translation( [-( 1.2 + 0.4),2.5 - 0.4,0 ]));
+     model_transform = model_transform.times(Mat4.scale( [ 0.5,0.5,0.5 ]));
+     this.shapes.sphere.draw(graphics_state, model_transform, this.scuba_sleeve); //draw shoulder
+     model_transform = model_transform.times(Mat4.rotation( 70 * Math.PI / 180, Vec.of(0,0,1)));
+     model_transform = model_transform.times(Mat4.scale( [ 2,2,2 ])); //scale back
+     model_transform = model_transform.times(Mat4.translation( [ -(0.2 + 1.7) ,0,0 ])); //1.7 is arm length along x
+     model_transform = model_transform.times(Mat4.scale( [ 1.7,0.4,0.4 ])); //draw upper arm
+     this.shapes.cube.draw(graphics_state, model_transform, this.scuba_sleeve);
+
+     model_transform = model_transform.times(Mat4.scale( [ 1/1.7,1/0.4,1/0.4 ])); //scale back
+     model_transform = model_transform.times(Mat4.translation( [-(1.7 + 0.1),0,0]));
+     model_transform = model_transform.times(Mat4.scale( [0.43,0.43,0.43] ));
+     this.shapes.sphere.draw(graphics_state, model_transform, this.scuba_sleeve);
+     model_transform = model_transform.times(Mat4.scale( [1/0.43,1/0.43,1/0.43] )); //scale back
+     model_transform = model_transform.times(Mat4.rotation( 40 * Math.PI / 180, Vec.of(0,0,1)));
+     model_transform = model_transform.times(Mat4.translation( [-(1.2+0.43),0,0])); // center of arm
+     model_transform = model_transform.times(Mat4.scale( [1.4,0.4,0.4] ));
+     this.shapes.cube.draw(graphics_state, model_transform , this.scuba_sleeve);
+
+
+
+  }
+
+  draw_arms_waving(matrix_stack, graphics_state, model_transform){
+     //return to center of body
+     model_transform = matrix_stack.pop();
+     matrix_stack.push(model_transform);
+     model_transform = model_transform.times(Mat4.translation( [ 1.2,2.5 ,0 ]));
+     
+     model_transform = model_transform.times(Mat4.translation( [ 0.4,-0.4,0 ]));
+     model_transform = model_transform.times(Mat4.scale( [ 0.5,0.5,0.5 ]));
+     this.shapes.sphere.draw(graphics_state, model_transform, this.scuba_sleeve); //draw shoulder
+     model_transform = model_transform.times(Mat4.rotation( -180 * Math.PI / 180, Vec.of(1,0,0))); // rotate arm up
+     model_transform = model_transform.times(Mat4.rotation( -70 * Math.PI / 180, Vec.of(0,0,1)));
+     model_transform = model_transform.times(Mat4.scale( [ 2,2,2 ])); //scale back
+     model_transform = model_transform.times(Mat4.translation( [ 0.2 + 1.7 ,0,0 ])); //1.7 is arm length along x
+     model_transform = model_transform.times(Mat4.scale( [ 1.7,0.4,0.4 ])); //draw upper arm
+     this.shapes.cube.draw(graphics_state, model_transform , this.scuba_sleeve);
+
+     model_transform = model_transform.times(Mat4.scale( [ 1/1.7,1/0.4,1/0.4 ])); //scale back
+     model_transform = model_transform.times(Mat4.translation( [1.7 + 0.1,0,0]));
+     model_transform = model_transform.times(Mat4.scale( [0.43,0.43,0.43] ));
+     this.shapes.sphere.draw(graphics_state, model_transform, this.scuba_sleeve); // elbow
+     model_transform = model_transform.times(Mat4.rotation(0.7 *  Math.sin(  5 * this.t), Vec.of(0,0,1)));
+     model_transform = model_transform.times(Mat4.scale( [1/0.43,1/0.43,1/0.43] )); //scale back
+     model_transform = model_transform.times(Mat4.rotation( -40 * Math.PI / 180, Vec.of(0,0,1)));
+     model_transform = model_transform.times(Mat4.translation( [1.2+0.43,0,0])); // center of arm
+     model_transform = model_transform.times(Mat4.scale( [1.4,0.4,0.4] ));
+     this.shapes.cube.draw(graphics_state, model_transform, this.scuba_sleeve);
+
+     //draw other arm
+     model_transform = matrix_stack.pop();
+     matrix_stack.push(model_transform);
+     model_transform = model_transform.times(Mat4.translation( [-( 1.2 + 0.4),2.5 - 0.4,0 ]));
+     model_transform = model_transform.times(Mat4.scale( [ 0.5,0.5,0.5 ]));
+     this.shapes.sphere.draw(graphics_state, model_transform, this.scuba_sleeve); //draw shoulder
+     model_transform = model_transform.times(Mat4.rotation( 70 * Math.PI / 180, Vec.of(0,0,1)));
+     model_transform = model_transform.times(Mat4.scale( [ 2,2,2 ])); //scale back
+     model_transform = model_transform.times(Mat4.translation( [ -(0.2 + 1.7) ,0,0 ])); //1.7 is arm length along x
+     model_transform = model_transform.times(Mat4.scale( [ 1.7,0.4,0.4 ])); //draw upper arm
+     this.shapes.cube.draw(graphics_state, model_transform, this.scuba_sleeve);
+
+     model_transform = model_transform.times(Mat4.scale( [ 1/1.7,1/0.4,1/0.4 ])); //scale back
+     model_transform = model_transform.times(Mat4.translation( [-(1.7 + 0.1),0,0]));
+     model_transform = model_transform.times(Mat4.scale( [0.43,0.43,0.43] ));
+     this.shapes.sphere.draw(graphics_state, model_transform, this.scuba_sleeve);
+     model_transform = model_transform.times(Mat4.scale( [1/0.43,1/0.43,1/0.43] )); //scale back
+     model_transform = model_transform.times(Mat4.rotation( 40 * Math.PI / 180, Vec.of(0,0,1)));
+     model_transform = model_transform.times(Mat4.translation( [-(1.2+0.43),0,0])); // center of arm
+     model_transform = model_transform.times(Mat4.scale( [1.4,0.4,0.4] ));
+     this.shapes.cube.draw(graphics_state, model_transform , this.scuba_sleeve);
+
+  }
+  draw_holding_hand(matrix_stack, graphics_state, model_transform, gender){
+  	// gender = 1 , boy, hold out right hand
+  	// gender = 2, girl, hold out left hand
+
+  	     //return to center of body
+     model_transform = matrix_stack.pop();
+     matrix_stack.push(model_transform);
+     model_transform = model_transform.times(Mat4.translation( [ 1.2,2.5 ,0 ]));
+  //   model_transform = model_transform.times(Mat4.rotation( -180 * Math.PI / 180, Vec.of(1,0,0))); // rotate arm up
+     model_transform = model_transform.times(Mat4.translation( [ 0.4,- 0.4,0 ]));
+     model_transform = model_transform.times(Mat4.scale( [ 0.5,0.5,0.5 ]));
+     this.shapes.sphere.draw(graphics_state, model_transform, this.scuba_sleeve); //draw shoulder
+     model_transform = model_transform.times(Mat4.rotation( -70 * Math.PI / 180, Vec.of(0,0,1)));
+     model_transform = model_transform.times(Mat4.scale( [ 2,2,2 ])); //scale back
+     model_transform = model_transform.times(Mat4.translation( [ 0.2 + 1.7 ,0,0 ])); //1.7 is arm length along x
+     model_transform = model_transform.times(Mat4.scale( [ 1.7,0.4,0.4 ])); //draw upper arm
+     this.shapes.cube.draw(graphics_state, model_transform , this.scuba_sleeve);
+
+     model_transform = model_transform.times(Mat4.scale( [ 1/1.7,1/0.4,1/0.4 ])); //scale back
+     model_transform = model_transform.times(Mat4.translation( [1.7 + 0.1,0,0]));
+     model_transform = model_transform.times(Mat4.scale( [0.43,0.43,0.43] ));
+     this.shapes.sphere.draw(graphics_state, model_transform, this.scuba_sleeve); //draw elbow
+     model_transform = model_transform.times(Mat4.scale( [1/0.43,1/0.43,1/0.43] )); //scale back
+     if(gender == 1)
+    	 model_transform = model_transform.times(Mat4.rotation( -40 * Math.PI / 180, Vec.of(0,0,1)));
+     if(gender == 2) //rotate hand to other side
+     	model_transform = model_transform.times(Mat4.rotation( 15 * Math.PI / 180, Vec.of(0,0,1)));
+     model_transform = model_transform.times(Mat4.translation( [1.2+0.43,0,0])); // center of arm
+     model_transform = model_transform.times(Mat4.scale( [1.4,0.4,0.4] ));
+     this.shapes.cube.draw(graphics_state, model_transform, this.scuba_sleeve);
+
+     //draw other arm
+     model_transform = matrix_stack.pop();
+     matrix_stack.push(model_transform);
+     model_transform = model_transform.times(Mat4.translation( [-( 1.2 + 0.4),2.5 - 0.4,0 ]));
+     model_transform = model_transform.times(Mat4.scale( [ 0.5,0.5,0.5 ]));
+     this.shapes.sphere.draw(graphics_state, model_transform, this.scuba_sleeve); //draw shoulder
+     model_transform = model_transform.times(Mat4.rotation( 70 * Math.PI / 180, Vec.of(0,0,1)));
+     model_transform = model_transform.times(Mat4.scale( [ 2,2,2 ])); //scale back
+     model_transform = model_transform.times(Mat4.translation( [ -(0.2 + 1.7) ,0,0 ])); //1.7 is arm length along x
+     model_transform = model_transform.times(Mat4.scale( [ 1.7,0.4,0.4 ])); //draw upper arm
+     this.shapes.cube.draw(graphics_state, model_transform, this.scuba_sleeve);
+
+     model_transform = model_transform.times(Mat4.scale( [ 1/1.7,1/0.4,1/0.4 ])); //scale back
+     model_transform = model_transform.times(Mat4.translation( [-(1.7 + 0.1),0,0]));
+     model_transform = model_transform.times(Mat4.scale( [0.43,0.43,0.43] ));
+     this.shapes.sphere.draw(graphics_state, model_transform, this.scuba_sleeve);
+     model_transform = model_transform.times(Mat4.scale( [1/0.43,1/0.43,1/0.43] )); //scale back
+   //  model_transform = model_transform.times(Mat4.rotation( 40 * Math.PI / 180, Vec.of(0,0,1)));
+     if(gender == 1)
+    	 model_transform = model_transform.times(Mat4.rotation( -15 * Math.PI / 180, Vec.of(0,0,1)));
+     if(gender == 2) //rotate hand to other side
+     	model_transform = model_transform.times(Mat4.rotation( 40 * Math.PI / 180, Vec.of(0,0,1)));
+     model_transform = model_transform.times(Mat4.translation( [-(1.2+0.43),0,0])); // center of arm
+     model_transform = model_transform.times(Mat4.scale( [1.4,0.4,0.4] ));
+     this.shapes.cube.draw(graphics_state, model_transform , this.scuba_sleeve);
+
+  }
+
+
+  draw_diver(graphics_state, model_transform, wave, gender, hold){
+  	// wave : 1 no, 2 yes
+  	// gender: 1 boy, 2 girl
+  	// hold: 1 no, 2 yes
+
+     let matrix_stack = [model_transform];
+     matrix_stack.push(model_transform);
+
+     model_transform = model_transform.times(Mat4.scale(Vec.of(1.2,2.5,0.8))); // body's dimensions
+     if(gender == 1) //use blue suit
+     	this.shapes.cube.draw(graphics_state, model_transform, this.scuba_suit);
+     if(gender == 2)
+     	this.shapes.cube.draw(graphics_state, model_transform, this.pink_scuba_suit);
+
+     model_transform = model_transform.times(Mat4.scale(Vec.of(1/1.2,1/2.5,1/0.8)));
+     
+     //draw head
+     model_transform = model_transform.times(Mat4.translation( [ 0,2+2.5,0 ])); //get to the center of head
+     model_transform = model_transform.times(Mat4.scale( [ 1.7,1.7,1.7 ]));
+     this.shapes.sphere.draw(graphics_state,  model_transform, this.body);
+     model_transform = model_transform.times(Mat4.scale( [ 1/1.7,1/1.7,1/1.7 ]));
+     model_transform = model_transform.times(Mat4.translation( [ 0,-2.1,0 ]));
+     model_transform = model_transform.times(Mat4.scale( [ 0.7,0.7,0.7 ]));
+     this.shapes.sphere.draw(graphics_state, model_transform, this.body);
+
+
+     // if num = 1 , put hands by his side
+     // if num = 2, waive hi!
+
+     if(wave == 1 && hold == 1)
+      this.draw_arms_by_body(matrix_stack, graphics_state, model_transform);
+     if(wave == 2 && hold == 1)
+      this.draw_arms_waving(matrix_stack, graphics_state, model_transform);
+  	 if(hold == 2) { //they want to hold hands
+  	 	if(gender == 1) // a boy! has to hold out right hand
+  	 		this.draw_holding_hand(matrix_stack, graphics_state, model_transform, 1);
+  	 	else // its a girl! has to hold out left hand
+  	 		this.draw_holding_hand(matrix_stack, graphics_state, model_transform, 2);
+
+  	 }
+
+
+
+     // return to center of body
+     model_transform = matrix_stack.pop();
+     matrix_stack.push(model_transform);
+     model_transform = model_transform.times(Mat4.translation( [0,-2.5 + 0.2, 0])); //translate the the bottom of body plus a little bit
+     model_transform = model_transform.times(Mat4.scale( [1.2,0.9,0.8] ));
+      if(gender == 1) //use blue suit
+     	this.shapes.sphere.draw(graphics_state, model_transform, this.scuba_suit);
+     if(gender == 2)
+     	this.shapes.sphere.draw(graphics_state, model_transform, this.pink_scuba_suit);
+
+
+     model_transform = model_transform.times(Mat4.scale( [1/1.2,1/0.9,1/0.8] )); // scale back
+
+     model_transform = model_transform.times(Mat4.rotation( -20 * Math.PI / 180, Vec.of(1,0,0)));
+     model_transform = model_transform.times(Mat4.rotation(0.5 * Math.sin(2 * this.t), Vec.of(1,0,0)));
+
+     model_transform = model_transform.times(Mat4.translation( [0.8,-0.4 - 2, 0])); //get to where the leg would start, add upper leg length on y axis (subtract)
+     model_transform = model_transform.times(Mat4.scale( [0.5,2,0.5] )); //uper leg dimensions
+     if(gender == 1) //use blue suit
+     	this.shapes.cube.draw(graphics_state, model_transform, this.scuba_suit);
+     if(gender == 2)
+     	this.shapes.cube.draw(graphics_state, model_transform, this.pink_scuba_suit);
+     model_transform = model_transform.times(Mat4.scale( [1/0.5,1/2,1/0.5] )); //scale back
+     model_transform = model_transform.times(Mat4.translation( [0,-2.4 + 0.1, 0]));// translate to middle of knee
+     model_transform = model_transform.times(Mat4.rotation( 35 * Math.PI / 180, Vec.of(1,0,0)));
+     model_transform = model_transform.times(Mat4.scale( [0.5,0.5,0.5] ));
+     if(gender == 1) //use blue suit
+     	this.shapes.sphere.draw(graphics_state, model_transform, this.scuba_suit);
+     if(gender == 2)
+     	this.shapes.sphere.draw(graphics_state, model_transform, this.pink_scuba_suit);
+     model_transform = model_transform.times(Mat4.scale( [1/0.5,1/0.5,1/0.5] )); //scale back
+     model_transform = model_transform.times(Mat4.translation( [0,-2.1, 0]));// translate to middle of bottom leg
+     model_transform = model_transform.times(Mat4.scale( [0.5,2,0.5] ));
+     if(gender == 1) //use blue suit
+     	this.shapes.cube.draw(graphics_state, model_transform, this.scuba_suit);
+     if(gender == 2)
+     	this.shapes.cube.draw(graphics_state, model_transform, this.pink_scuba_suit);
+     model_transform = model_transform.times(Mat4.scale( [1/0.5,1/2,1/0.5] )); //scale back
+
+     model_transform = model_transform.times(Mat4.translation( [0,-2, 0])); // translate to end of bottom part of leg
+     model_transform = model_transform.times(Mat4.rotation( 20 * Math.PI / 180, Vec.of(1,0,0)));
+     model_transform = model_transform.times(Mat4.rotation( -90 * Math.PI / 180, Vec.of(1,0,0)));
+     model_transform = model_transform.times(Mat4.translation( [0,-3.5, 0])); 
+
+     model_transform = model_transform.times(Mat4.scale( [1,4.1,0.1] ));
+     this.shapes.pyramid.draw(graphics_state, model_transform, this.scuba_suit);
+
+     // draw other leg
+     model_transform = matrix_stack.pop();
+     matrix_stack.push(model_transform);
+     model_transform = model_transform.times(Mat4.translation( [0,-2.5 + 0.2, 0])); //translate the the bottom of body plus a little bit
+
+     model_transform = model_transform.times(Mat4.rotation( -20 * Math.PI / 180, Vec.of(1,0,0)));
+     model_transform = model_transform.times(Mat4.rotation(0.5 * Math.sin( - 2 * this.t), Vec.of(1,0,0)));
+
+
+     model_transform = model_transform.times(Mat4.translation( [-0.8,-0.4 - 2, 0])); //get to where the leg would start, add upper leg length on y axis (subtract)
+     model_transform = model_transform.times(Mat4.scale( [0.5,2,0.5] )); //uper leg dimensions
+     if(gender == 1) //use blue suit
+     	this.shapes.cube.draw(graphics_state, model_transform, this.scuba_suit);
+     if(gender == 2)
+     	this.shapes.cube.draw(graphics_state, model_transform, this.pink_scuba_suit);
+     model_transform = model_transform.times(Mat4.scale( [1/0.5,1/2,1/0.5] )); //scale back
+     model_transform = model_transform.times(Mat4.translation( [0,-2.4 + 0.1, 0]));// translate to middle of knee
+     model_transform = model_transform.times(Mat4.rotation( 35 * Math.PI / 180, Vec.of(1,0,0)));
+     model_transform = model_transform.times(Mat4.scale( [0.5,0.5,0.5] ));
+     if(gender == 1) //use blue suit
+     	this.shapes.sphere.draw(graphics_state, model_transform, this.scuba_suit);
+     if(gender == 2)
+     	this.shapes.sphere.draw(graphics_state, model_transform, this.pink_scuba_suit);
+     model_transform = model_transform.times(Mat4.scale( [1/0.5,1/0.5,1/0.5] )); //scale back
+     model_transform = model_transform.times(Mat4.translation( [0,-2, 0]));// translate to middle of bottom leg
+     model_transform = model_transform.times(Mat4.scale( [0.5,2,0.5] ));
+     if(gender == 1) //use blue suit
+     	this.shapes.cube.draw(graphics_state, model_transform, this.scuba_suit);
+     if(gender == 2)
+     	this.shapes.cube.draw(graphics_state, model_transform, this.pink_scuba_suit);
+     // draw bottom
+     model_transform = model_transform.times(Mat4.scale( [1/0.5,1/2,1/0.5] )); //scale back
+
+     model_transform = model_transform.times(Mat4.translation( [0,-2, 0])); // translate to end of bottom part of leg
+     model_transform = model_transform.times(Mat4.rotation( 20 * Math.PI / 180, Vec.of(1,0,0)));
+     model_transform = model_transform.times(Mat4.rotation( -90 * Math.PI / 180, Vec.of(1,0,0)));
+     model_transform = model_transform.times(Mat4.translation( [0,-3.5, 0])); 
+
+     model_transform = model_transform.times(Mat4.scale( [1,4.1,0.1] ));
+     this.shapes.pyramid.draw(graphics_state, model_transform, this.scuba_suit);
+
+
+
+
+     // draw gas tank
+     model_transform = matrix_stack.pop();
+     matrix_stack.push(model_transform); //return to center of body
+     model_transform = model_transform.times(Mat4.translation([ 0,0.4,-0.8-1.2])); // translate to center of gas tank
+     model_transform = model_transform.times(Mat4.scale([ 1.2,3,1.2]));
+     this.shapes.sphere.draw(graphics_state, model_transform = model_transform, this.greyPlastic);
+
+  }
+
+  draw_crab_leg(graphics_state, model_transform, num){
+    // num = 1 for right, -1 for left
+
+ //  model_transform = model_transform.times(Mat4.rotation(0.2 * num * Math.sin( this.t), Vec.of(0,0,1))); // added
+     model_transform = model_transform.times(Mat4.translation( [num*2,0,0])); //translate to middle of first section
+     model_transform = model_transform.times(Mat4.scale( [ 2,0.5,0.5 ]));
+     this.shapes.sphere.draw(graphics_state, model_transform = model_transform, this.crab);
+     model_transform = model_transform.times(Mat4.scale( [ 1/2,1/0.5,1/0.5 ])); //scale back
+     //let rootate here
+  //   model_transform = model_transform.times(Math4.rotation( 60 * Math.PI / 180, [0,0,1]));
+
+     model_transform = model_transform.times(Mat4.translation( [num*(2 - 0.5),0,0])); //translate to middle of middle section -0.5 to make them intersect
+     model_transform = model_transform.times(Mat4.rotation( -35 * num * Math.PI / 180, Vec.of(0,0,1)));
+   model_transform = model_transform.times(Mat4.translation( [num * 1.5,0,0]));
+     model_transform = model_transform.times(Mat4.scale( [ 1.5,0.5,0.5 ]));
+     this.shapes.sphere.draw(graphics_state, model_transform, this.crab);
+     model_transform = model_transform.times(Mat4.scale( [ 1/1.5,1/0.5,1/0.5 ])); //scale back
+     model_transform = model_transform.times(Mat4.translation( [num*(1.5 - 0.1),0,0])); 
+     model_transform = model_transform.times(Mat4.rotation( -45 * num * Math.PI / 180, Vec.of(0,0,1)));
+   model_transform = model_transform.times(Mat4.translation( [num * 1.5,0,0]));
+   model_transform = model_transform.times(Mat4.scale( [ 1.5,0.4,0.4 ]));
+     this.shapes.sphere.draw(graphics_state, model_transform = model_transform, this.crab);
+  }
+
+  draw_crab_claw(graphics_state, model_transform, num, move){
+    // num = 1 for right, -1 for left
+    // move = 1 to move claws, 2 to not move
+     let matrix_stack = [model_transform];
+     model_transform = model_transform.times(Mat4.translation( [num*2.7,0.4,2.5]));
+     model_transform = model_transform.times(Mat4.rotation( -40 * num * Math.PI / 180, Vec.of(0,1,0)));
+     model_transform = model_transform.times(Mat4.rotation( 40 * num * Math.PI / 180, Vec.of(0,0,1)));
+
+     model_transform = model_transform.times(Mat4.translation( [num * 2,0,0])); //translate to middle of first section
+     model_transform = model_transform.times(Mat4.scale( [ 2,0.5,0.5 ]));
+     this.shapes.sphere.draw(graphics_state, model_transform = model_transform, this.crab);
+     model_transform = model_transform.times(Mat4.scale( [ 1/2,1/0.5,1/0.5 ])); //scale back
+     //let rootate here
+  //   model_transform = model_transform.times(Math4.rotation( 60 * Math.PI / 180, [0,0,1]));
+
+     model_transform = model_transform.times(Mat4.translation( [num * (2 - 0.5),0,0])); //translate to middle of middle section -0.5 to make them intersect
+     model_transform = model_transform.times(Mat4.rotation( 35 * num * Math.PI / 180, Vec.of(0,0,1)));
+   model_transform = model_transform.times(Mat4.translation( [num * 0.7,0,0])); //size of middle section
+     model_transform = model_transform.times(Mat4.scale( [ 0.7,0.4,0.4 ]));
+     this.shapes.sphere.draw(graphics_state, model_transform , this.crab);
+     model_transform = model_transform.times(Mat4.scale( [ 1/0.7,1/0.4,1/0.4 ])); //scale back
+     model_transform = model_transform.times(Mat4.translation( [num * (0.7 - 0.2),0,0])); 
+     model_transform = model_transform.times(Mat4.rotation( 45 * num * Math.PI / 180, Vec.of(0,0,1)));
+   model_transform = model_transform.times(Mat4.translation( [num * 1.3,0,0]));
+   model_transform = model_transform.times(Mat4.scale( [ 1.4,0.4,0.4 ]));
+     this.shapes.sphere.draw(graphics_state, model_transform , this.crab);
+     model_transform = model_transform.times(Mat4.scale( [ 1/1.4,1/0.4,1/0.4 ])); //scale back
+     
+     //start drawing claws
+     model_transform = model_transform.times(Mat4.translation( [num*1.4, num*0.25, 0]));
+
+   //  matrix_stack.push(model_transform = model_transform);
+
+     matrix_stack.push(model_transform); //remember this point
+     model_transform = model_transform.times(Mat4.rotation( 30  * Math.PI / 180, Vec.of(0,0,1)));
+     if(move == 1){
+    	 model_transform = model_transform.times(Mat4.rotation(0.5  * Math.sin(  5 * this.t), Vec.of(0,0,1)));
+     }
+     model_transform = model_transform.times(Mat4.translation( [num* (0.5 - 0.1) , 0, 0]));
+     model_transform = model_transform.times(Mat4.scale( [1,0.3,0.3]));
+     this.shapes.sphere.draw(graphics_state, model_transform = model_transform, this.crab); // make one claw
+
+     model_transform = matrix_stack.pop(); //return to point remembered
+     model_transform = model_transform.times(Mat4.translation([0,num * -0.5,0]));
+  
+   model_transform = model_transform.times(Mat4.rotation( -30 * Math.PI / 180, Vec.of(0,0,1))); //rotate to other side
+   if(move == 1){
+  	 model_transform = model_transform.times(Mat4.rotation(0.5  *Math.sin( - 5 * this.t), Vec.of(0,0,1)));
+   }
+   model_transform = model_transform.times(Mat4.translation( [num * (0.5 - 0.1) , 0, 0]));
+     model_transform = model_transform.times(Mat4.scale( [1,0.3,0.3]));
+     this.shapes.sphere.draw(graphics_state, model_transform = model_transform, this.crab);
+
+  }
+
+
+
+  draw_crab(graphics_state, model_transform, move){
+  	// move is a num, 1 = more claws, 2 = dont move
+
+     let matrix_stack = [model_transform];    
+     matrix_stack.push(model_transform); //remember beginning point
+
+     model_transform = model_transform.times(Mat4.scale([ 5,2.5,4]));
+     this.shapes.sphere.draw(graphics_state, model_transform, this.crab); //draw crab body
+     model_transform = model_transform.times(Mat4.scale([ 1/5,1/3,1/4])); //scale back
+
+
+     // draw all right legs
+     for(let i=0; i<3; i++){
+      model_transform = matrix_stack.pop();
+      matrix_stack.push(model_transform);
+      model_transform = model_transform.times(Mat4.translation( [ 3.5,-1,(-0.5 + i) ]));
+      model_transform = model_transform.times(Mat4.rotation( (10 - 30*i) * Math.PI / 180, Vec.of(0,1,0)));
+      this.draw_crab_leg(graphics_state, model_transform, 1);  
+     }  
+
+     // draw all left legs
+     for(let i=0; i<3; i++){
+      model_transform = matrix_stack.pop();
+      matrix_stack.push(model_transform);
+      model_transform = model_transform.times(Mat4.translation( [ -3.5,-1,(-0.5 + i) ]));
+      model_transform = model_transform.times(Mat4.rotation( (10 - 30*i) * (-1) * Math.PI / 180, Vec.of(0,1,0)));
+      this.draw_crab_leg(graphics_state, model_transform, -1);  
+     }  
+
+
+
+     // draw upper claws
+     model_transform = matrix_stack.pop();
+     matrix_stack.push(model_transform);
+
+     this.draw_crab_claw(graphics_state, model_transform, 1, move);
+     this.draw_crab_claw(graphics_state, model_transform, -1, move);
+
+
+     // draw eyes!
+     //return to center
+   model_transform = matrix_stack.pop(); 
+   matrix_stack.push(model_transform);
+
+   model_transform = model_transform.times(Mat4.translation([ 1.3,1.2,3.2]));
+   model_transform = model_transform.times(Mat4.scale( [0.7,0.7,0.7]));
+   this.shapes.sphere.draw(graphics_state, model_transform, this.black);
+
+   model_transform = matrix_stack.pop(); 
+   matrix_stack.push(model_transform);
+   
+   model_transform = model_transform.times(Mat4.translation([ -1.3,1.2,3.2]));
+     model_transform = model_transform.times(Mat4.scale( [0.7,0.7,0.7]));
+   this.shapes.sphere.draw(graphics_state, model_transform, this.black);
+
+  }
+
+  draw_puffer(graphics_state, model_transform){
+  //  model_transform = model_transform.times(Mat4.scale([1/8,1/8,1]));
+  //  this.shapes.tetrahedron.draw(graphics_state, model_transform, this.greyPlastic);
+     let matrix_stack = [model_transform]; 
+     matrix_stack.push(model_transform); //remember the middle
+
+
+     model_transform = model_transform.times(Mat4.scale( [1.1,1.1,1.1]));
+     this.shapes.sphere.draw(graphics_state, model_transform, this.puffer); // draw fish' body
+     model_transform = model_transform.times(Mat4.scale( [1/1.1,1/1.1,1/1.1])); //scale back
+     model_transform = model_transform.times(Mat4.translation([ 0,1,0]));
+  
+  //draw all /\s
+  for ( let j=0; j<20; j ++){
+     for (let i=0; i<36; i++){
+      model_transform = matrix_stack.pop(); // get center
+      matrix_stack.push(model_transform); //remember the middle
+
+      model_transform = model_transform.times(Mat4.rotation( (15*j ) * Math.PI / 180, Vec.of(1,0,0))); // rotate x a little
+
+      model_transform = model_transform.times(Mat4.rotation( ( 15* i ) * Math.PI / 180, Vec.of(0,0,1))); // rotate z a little
+      model_transform = model_transform.times(Mat4.translation([ 0,1,0])); // translate to starting point
+      model_transform = model_transform.times(Mat4.scale( [0.05,0.3,0.05])); //scale to make pyramid look like /\
+      this.shapes.pyramid.draw(graphics_state, model_transform, this.puffer);
+   }
+  }
+
+  // draw both eyes
+  for (let i=-1 ;i<3; i+=2 ){
+    model_transform = matrix_stack.pop(); // get center
+    matrix_stack.push(model_transform); //remember the middle
+    model_transform = model_transform.times(Mat4.rotation(  -20 * Math.PI / 180, Vec.of(1,0,0))); // rotate x a little to make eyes go up
+    model_transform = model_transform.times(Mat4.rotation( i * 35 * Math.PI / 180, Vec.of(0,1,0))); // rotate y a little
+    model_transform = model_transform.times(Mat4.translation([ 0,0,1.09])); // translate on z 
+    model_transform = model_transform.times(Mat4.scale( [0.35,0.35,0.35]));
+    this.shapes.sphere.draw(graphics_state, model_transform, this.white); // draw white eye
+    model_transform = model_transform.times(Mat4.scale( [1/0.35,1/0.35,1/0.35])); // scale back
+    model_transform = model_transform.times(Mat4.translation([ 0,0,0.30])); // get to top of eye
+    model_transform = model_transform.times(Mat4.scale( [0.1,0.1,0.1]));
+    this.shapes.sphere.draw(graphics_state, model_transform, this.black); // draw black part on eye
+}
+
+
+    //draw both side pyramids for fins
+
+    for (let i=-1 ;i<3; i+=2 ){
+      model_transform = matrix_stack.pop(); // get center
+      matrix_stack.push(model_transform); //remember the middle
+
+      model_transform = model_transform.times(Mat4.rotation(  i * 90 * Math.PI / 180, Vec.of(0,0,1))); // roatate z by 90 degrees
+      model_transform = model_transform.times(Mat4.translation([ 0,-1.1,0])); //translate to edge of puffer's body
+      model_transform = model_transform.times(Mat4.rotation(0.5 * Math.sin( - 5 * this.t), Vec.of(1,0,0)));
+      model_transform = model_transform.times(Mat4.translation([ 0,-0.4,0])); // translate on y to get to the side
+      model_transform = model_transform.times(Mat4.scale( [0.3,0.8,0.01])); // scale to get a fin shape
+      this.shapes.pyramid.draw(graphics_state, model_transform, this.puffer_fin); // draw fin
+    }
+  
+  }  
+
+ /* draw_seaweed(graphics_state, model_transform, color){
+  	// num for color, rotation change ? 
+     let matrix_stack = [model_transform]; 
+     matrix_stack.push(model_transform);
+
+
+     model_transform = model_transform.times(Mat4.scale( [0.4,1,0.4])); // bottom part
+     this.shapes.sphere.draw(graphics_state, model_transform, this.puffer_fin); 
+     model_transform = model_transform.times(Mat4.scale( [1/0.4,1,1/0.4])); // scale back
+     model_transform = model_transform.times(Mat4.translation([ 0,1,0])); // translate up to where bottom ends, a little less
+     
+     this.shapes.coral.draw(graphics_state, model_transform, this.pink_coral);
+
+     model_transform = model_transform.times(Mat4.translation([ 0,2,0]));
+     this.shapes.weed.draw(graphics_state, model_transform, this.green_weed);
+
+
+     model_transform = model_transform.times(Mat4.translation([ 0,2,0]));
+     this.shapes.grass.draw(graphics_state, model_transform, this.orange_weed);
+
+
+
+
+     //start drawing first
+     // rotate here
+     model_transform = model_transform.times(Mat4.translation([ 0,0.4,0])); 
+     for(let j=0; j<3; j++){
+     //	matrix_stack.push(model_transform);
+	  //   model_transform = model_transform.times(Mat4.translation([ 0,0.6,0])); // midle of first part
+
+	     model_transform = model_transform.times(Mat4.rotation(0.2  *Math.sin( this.t), Vec.of(0,0,1)));
+	    
+	     model_transform = model_transform.times(Mat4.rotation( 20 * Math.PI / 180, Vec.of(0,0,1)));
+
+	     model_transform = model_transform.times(Mat4.scale( [0.3,0.6,0.3])); 
+	     this.shapes.sphere.draw(graphics_state, model_transform, this.puffer_fin);  // draw first part
+	     model_transform = model_transform.times(Mat4.scale( [1/0.3,1/0.6,1/0.3]));  // scale back
+	     model_transform = model_transform.times(Mat4.translation([ 0,0.6,0])); 
+	     model_transform = model_transform.times(Mat4.rotation( -20 * Math.PI / 180, Vec.of(0,0,1))); // rotate back
+
+	}
+
+
+  
+
+
+
+  } */
+ 
+  display( graphics_state )
+    { var model_transform = Mat4.identity();             // We begin with a brand new model_transform = model_transform every frame.
+      var matrix_model = Mat4.identity();
+
+
+
+    //  this.shapes.cube.draw( graphics_state, model_transform = model_transform, this.stars );
+      
+      // *** Lights: *** Values of vector or point lights over time.  Two different lights *per shape* supported by Phong_Shader; more requires changing a number in the vertex 
+     graphics_state.lights = [ new Light( Vec.of(  30,  30,  34, 1 ), Color.of( 0, .4, 0, 1 ), 100000 ),      // shader.  Arguments to construct a Light(): Light source position
+                                new Light( Vec.of( -10, -20, -14, 0 ), Color.of( 1, 1, .3, 1 ), 100    ) ];    // or vector (homogeneous coordinates), color, and size.  
+      
+  this.t = graphics_state.animation_time/1000;  
+
+
+
+    let matrix_stack = [model_transform]; 
+
+     matrix_stack.push(model_transform);
+ 
+
+
+     model_transform =  matrix_stack.pop();
+
+  //this.draw_crab(graphics_state, model_transform);
+   //  graphics_state.camera_transform = Mat4.look_at( [ 0,0,1 ], [ 0,0,0 ], [ 0,1,0 ] );
+  //  graphics_state.camera_transform = Mat4.look_at( Vec.of( 5,0,0 ), Vec.of( ,10,0), Vec.of( 0,0,1 ) );
+   //this.pos, objectPos, yAxis
+   // eye, at, up
+
+/*
+    model_transform = Mat4.identity();
+    model_transform = model_transform.times(Mat4.scale([1,4,1]));
+    this.shapes.pyramid.draw(graphics_state, model_transform, this.greyPlastic);
+*/
+  //  this.shapes.cube.draw(graphics_state, model_transform, this.sand);
+
+
+	model_transform = Mat4.identity();
+	model_transform = model_transform.times(Mat4.scale( [1,2,1])); 
+ //   this.draw_seaweed(graphics_state, model_transform,1);
+
+	
+	
+
+ 	
+     // start animation
+   var diving_down = graphics_state.animation_time - 2000; // start 2 seconds after to let program start, play for 5 seconds
+   var puffer_looks = graphics_state.animation_time - 7000; // Start the scene 7 seconds in, 4 second 
+   var diver_waves = graphics_state.animation_time - 11000; // starts after 11 seconds, scene: 4 seconds
+   var puffer_expands = graphics_state.animation_time - 15000; // 15 seconds after, scene time: 3 seconds
+   var diver_swims_away_from_puffer = graphics_state.animation_time -  18000;  // 18 sec, scene time: 20 sec
+   var diver_hello_crab = graphics_state.animation_time -  38000; // 38 second, 8 sec
+   var diver_goes_up = graphics_state.animation_time -  46000; // 46 seconds, 11 seconds
+   var divers_say_hello = graphics_state.animation_time -  57000; // 58 seconds, 6 second
+   var final_scene = graphics_state.animation_time -  63000; // 64 seconds, 
+
+
+
+   if(diving_down > 5000) // play for 5 seconds
+    diving_down = -1;
+   if( puffer_looks > 4000 ) // This scene will last 4 seconds...
+     puffer_looks = -1; // ...after which, it will go away again.
+   if(diver_waves > 4000) // diver waves for 4 seconds
+     diver_waves = -1;
+   if(puffer_expands > 3000) // 4 seconds 
+    puffer_expands = -1;
+  if(diver_swims_away_from_puffer > 20000)
+    diver_swims_away_from_puffer = -1;
+  if(diver_hello_crab > 8000)
+  	diver_hello_crab = -1; 
+  if(diver_goes_up > 11000)
+  	diver_goes_up = -1
+  if(divers_say_hello > 6000)
+  	divers_say_hello = -1;
+  if(final_scene > 20000)
+  	final_scene = -1;
+
+
+
+// at look up
+ // graphics_state.camera_transform = Mat4.look_at(  Vec.of( 0,5,0 ), Vec.of(0,1,0), Vec.of( 1,0,0 ) );
+//  graphics_state.camera_transform = Mat4.look_at(  Vec.of( 1,1,1 ), Vec.of(-5,-5,-5), Vec.of( 0,1,0 ) );
+
+   if(diving_down > 0){
+
+    graphics_state.camera_transform = Mat4.look_at(  Vec.of( -10,10,40 ), Vec.of(-10,10,0), Vec.of( 0,1,0 ) );
+
+    for(let i=0; i<2; i++){
+       model_transform = Mat4.identity();
+       model_transform = model_transform.times(Mat4.translation([ -10 + i,8 + i ,1]));
+       this.draw_bubble(graphics_state, model_transform, 0.7);
+
+       model_transform = Mat4.identity();
+       model_transform = model_transform.times(Mat4.translation([ -30 + i,-7 + i ,1]));
+       this.draw_bubble(graphics_state, model_transform, 0.5);
+
+
+       model_transform = Mat4.identity();
+       model_transform = model_transform.times(Mat4.translation([ -25 + 8 * i,-20 + i ,1]));
+       this.draw_bubble(graphics_state, model_transform, 0.5);
+
+       model_transform = Mat4.identity();
+       model_transform = model_transform.times(Mat4.translation([ 5 + 4 * i,-30 + i ,1]));
+       this.draw_bubble(graphics_state, model_transform, 0.3);
+
+       model_transform = Mat4.identity();
+       model_transform = model_transform.times(Mat4.translation([ -20 + 3 * i, -2 + i ,1]));
+       this.draw_bubble(graphics_state, model_transform, 0.7);
+
+       model_transform = Mat4.identity();
+       model_transform = model_transform.times(Mat4.translation([ 2 + 3*i ,1 + i,1]));
+       this.draw_bubble(graphics_state, model_transform, 0.9);
+
+       model_transform = Mat4.identity();
+       model_transform = model_transform.times(Mat4.translation([ -5 - 2*i,-3 + 2 * i,1]));
+       this.draw_bubble(graphics_state, model_transform, 0.8);
+}
+
+      model_transform = Mat4.identity();
+
+    //  model_transform = model_transform.times(Mat4.scale([1,1,1]));
+     this.draw_puffer(graphics_state, model_transform);
+      model_transform = Mat4.identity();
+      model_transform = model_transform.times(Mat4.translation([ -30,30,0]));
+      model_transform = model_transform.times(Mat4.translation([2 * this.t ,-2 * this.t,0]));
+      model_transform = model_transform.times(Mat4.rotation( 90 * Math.PI / 180, Vec.of(0,1,0)));
+      model_transform = model_transform.times(Mat4.rotation( 100 * Math.PI / 180, Vec.of(1,0,0)));
+      this.draw_diver(graphics_state, model_transform, 1,1,1); // 1 for person not waving 
+   }
+   if( puffer_looks > 0 ){
+   	model_transform = Mat4.identity();
+   	graphics_state.camera_transform = Mat4.look_at(  Vec.of( 0,0,15 ), Vec.of(0,0,0), Vec.of( 0,1,0 ) );
+      
+     model_transform = model_transform.times(Mat4.translation([0,0.2 * Math.sin(  5 * this.t),0]));
+   //  model_transform = model_transform.times(Mat4.scale([1,1,1]));
+      this.draw_puffer(graphics_state, model_transform);
+  } 
+
+  if(diver_waves > 0){
+  	graphics_state.camera_transform = Mat4.look_at(  Vec.of( -4,4,25 ), Vec.of(-4,4,0), Vec.of( 0,1,0 ) );
+     model_transform = Mat4.identity();
+     model_transform = model_transform.times(Mat4.translation([-4,4,0])); //tranlate to where diver is
+     model_transform = model_transform.times(Mat4.translation([0,0.3 * Math.sin(  2 * this.t),0]));
+     this.draw_diver(graphics_state, model_transform, 2,1,1); // 2 diver waves
+  }
+
+  if(puffer_expands > 0){
+  	var time = this.t - 5; // start exaplnding a second before scene starts
+  	graphics_state.camera_transform = Mat4.look_at(  Vec.of( 0,0,17 ), Vec.of(0,0,0), Vec.of( 0,1,0 ) );
+    model_transform = Mat4.identity();
+    model_transform = model_transform.times(Mat4.scale( [ 0.2 * time, 0.2*time, 0.2*time]));
+    this.draw_puffer(graphics_state, model_transform);
+  }
+
+  if(diver_swims_away_from_puffer > 0){
+
+  	var time = this.t - 14;
+  	var time2 = this.t - 19;
+	
+	graphics_state.camera_transform = Mat4.look_at(  Vec.of( -14 - 2 * time2,0,45 ), Vec.of(-14-2 * time2,0,0), Vec.of( 0,1,0 ) );
+
+ // 	graphics_state.camera_transform = Mat4.look_at(  Vec.of( -10,0,25 ), Vec.of(-10,0,0), Vec.of( 0,1,0 ) );
+  	// let time = this.t - 
+    // puffer continues explanding while the person goes to the left
+
+    // draw all seeweed in this scene
+    for(let j=-3; j<3; j+=5){
+  
+    for (let i=1; i<3; i++){
+    model_transform = Mat4.identity();
+    model_transform = model_transform.times(Mat4.scale( [ 2, 2, 2]));
+    model_transform = model_transform.times(Mat4.translation([ - 10*i,-3.5, 0]));
+    model_transform = model_transform.times(Mat4.rotation( -90 * Math.PI / 180, Vec.of(1,0,0)));
+     this.shapes.coral.draw(graphics_state, model_transform, this.pink_coral);
+     model_transform = model_transform.times(Mat4.rotation( 90 * Math.PI / 180, Vec.of(1,0,0)));
+
+     model_transform = model_transform.times(Mat4.translation([3 - 6*i,0,-2*i + j]));
+     this.shapes.weed.draw(graphics_state, model_transform, this.green_weed);
+
+
+     model_transform = model_transform.times(Mat4.translation([ 5 - i,0,3 * i + 1.5 * j]));
+     this.shapes.grass.draw(graphics_state, model_transform, this.orange_weed);
+
+}
+
+}
+	//draw few more in the badk
+	model_transform = Mat4.identity();
+    model_transform = model_transform.times(Mat4.scale( [ 2, 2, 2]));
+    // put another 3 in the 
+    model_transform = model_transform.times(Mat4.translation([ -3 ,-3.5, -10]));
+    this.shapes.grass.draw(graphics_state, model_transform, this.orange_weed);
+    model_transform = model_transform.times(Mat4.translation([ -4 ,0, -5]));
+    this.shapes.grass.draw(graphics_state, model_transform, this.orange_weed);
+    model_transform = model_transform.times(Mat4.translation([ 2 ,0, -10]));
+    this.shapes.weed.draw(graphics_state, model_transform, this.green_weed);
+    model_transform = model_transform.times(Mat4.translation([ -10 ,0, 2]));
+    model_transform = model_transform.times(Mat4.rotation( -90 * Math.PI / 180, Vec.of(1,0,0)));
+     this.shapes.coral.draw(graphics_state, model_transform, this.pink_coral);
+     model_transform = model_transform.times(Mat4.rotation( 90 * Math.PI / 180, Vec.of(1,0,0)));
+         model_transform = model_transform.times(Mat4.translation([ -2 ,0, 3]));
+    model_transform = model_transform.times(Mat4.rotation( -90 * Math.PI / 180, Vec.of(1,0,0)));
+     this.shapes.coral.draw(graphics_state, model_transform, this.pink_coral);
+     model_transform = model_transform.times(Mat4.rotation( 90 * Math.PI / 180, Vec.of(1,0,0)));
+
+
+
+
+
+    model_transform = Mat4.identity();
+    model_transform = model_transform.times(Mat4.rotation( -90 * Math.PI / 180, Vec.of(0,1,0)));
+    model_transform = model_transform.times(Mat4.scale( [ 0.2 * time,  0.2 * time, 0.2 *  time]));
+    this.draw_puffer(graphics_state, model_transform);
+    model_transform = Mat4.identity();
+    model_transform = model_transform.times(Mat4.translation([ -17,0,0])); //translate diver to the left
+    model_transform = model_transform.times(Mat4.rotation( -90 * Math.PI / 180, Vec.of(0,1,0)));  //rotate diver to look to the left
+    model_transform = model_transform.times(Mat4.rotation( 90 * Math.PI / 180, Vec.of(1,0,0)));
+
+	
+	model_transform = model_transform.times(Mat4.translation([0,0, 0.8 * Math.sin(  3 * this.t)])); // make diver swim a little up and down 0.2
+    model_transform = model_transform.times(Mat4.translation([0, 2*time2,0])); // make diver swim to the left
+    this.draw_diver(graphics_state, model_transform, 1,1,1); // 1 for person not waving 
+
+    // draw crab
+    model_transform = Mat4.identity();
+    model_transform = model_transform.times(Mat4.translation([-65, -4,0])); // crab will stand here //or 55
+    model_transform = model_transform.times(Mat4.rotation( 90 * Math.PI / 180, Vec.of(0,1,0))); // crab will look at diver
+    // draw first crab
+    model_transform = model_transform.times(Mat4.scale( [0.1, 0.1, 0.1]));
+    this.draw_crab(graphics_state, model_transform,1);
+    // scale back and draw second crab
+    model_transform = model_transform.times(Mat4.scale( [1/0.1, 1/0.1, 1/0.1]));
+    model_transform = model_transform.times(Mat4.translation([-3, 0,-4]));
+    model_transform = model_transform.times(Mat4.scale( [0.35, 0.35, 0.35]));
+    this.draw_crab(graphics_state, model_transform,1);
+    // scale back and draw third crab
+    model_transform = model_transform.times(Mat4.scale( [1/0.35, 1/0.35, 1/0.35]));
+    model_transform = model_transform.times(Mat4.translation([2, 0,1]));
+    model_transform = model_transform.times(Mat4.scale( [0.05, 0.05, 0.05]));
+    this.draw_crab(graphics_state, model_transform,1);
+    // scale back and draw 4th crab
+    model_transform = model_transform.times(Mat4.scale( [1/0.05, 1/0.05, 1/0.05]));
+    model_transform = model_transform.times(Mat4.translation([-7, 0,-4]));
+    model_transform = model_transform.times(Mat4.scale( [0.15, 0.15, 0.15]));
+    this.draw_crab(graphics_state, model_transform,1);
+    //scale back and draw 5th crab
+    model_transform = model_transform.times(Mat4.scale( [1/0.15, 1/0.15, 1/0.15]));
+    model_transform = model_transform.times(Mat4.translation([-3, -2,7]));
+    model_transform = model_transform.times(Mat4.scale( [0.05, 0.06, 0.08]));
+    this.draw_crab(graphics_state, model_transform,1);
+    //scale back and draw 5th crab
+    model_transform = model_transform.times(Mat4.scale( [1/0.2, 1/0.2, 1/0.2]));
+    model_transform = model_transform.times(Mat4.translation([7, 0,7]));
+    model_transform = model_transform.times(Mat4.scale( [0.1, 0.1, 0.2]));
+    this.draw_crab(graphics_state, model_transform,1);
+  }
+  
+
+  if(diver_hello_crab > 0){
+  	let time3 = this.t - 38;
+  	// 1st three seconds: diver says hello to crab
+  	// seconds 4 to 7: crab does claw thing
+  	graphics_state.camera_transform = Mat4.look_at(  Vec.of(5,10,30), Vec.of(-4,-2,0), Vec.of( 0,1,0 ) );
+
+  	model_transform = Mat4.identity();
+  	model_transform = model_transform.times(Mat4.rotation( -90 * Math.PI / 180, Vec.of(0,1,0)));  //rotate diver to look to the left
+    model_transform = model_transform.times(Mat4.rotation( 50 * Math.PI / 180, Vec.of(1,0,0))); // make him lean forward 90
+
+	
+	model_transform = model_transform.times(Mat4.translation([0,3, 0.4 * Math.sin(  3 * this.t)])); // make diver swim a little up and down 0.2
+   	if (time3 < 3){ this.draw_diver(graphics_state, model_transform, 2,1,1); } // diver is waving
+
+    model_transform = Mat4.identity(); // come back to center
+    model_transform = model_transform.times(Mat4.translation([-15,-5,0])); // translate to where the crab is
+
+    model_transform = model_transform.times(Mat4.scale( [0.7, 0.7, 0.7]));
+    model_transform = model_transform.times(Mat4.rotation( 90 * Math.PI / 180, Vec.of(0,1,0))); // make crab face diver
+    if(time3 < 2)
+   		this.draw_crab(graphics_state, model_transform,2); //draw crab 2 = not moving
+   	if(time3 >=2 && time3 < 3)
+   		this.draw_crab(graphics_state, model_transform,1); // crab's wavinn!
+   	else if (time3 >=3 ){
+   		let time4 = time3 - 3; // start this when time4 = 0
+   		this.draw_crab(graphics_state, model_transform,1);
+   		model_transform = Mat4.identity();
+  		model_transform = model_transform.times(Mat4.rotation( -90 * Math.PI / 180, Vec.of(0,1,0)));  //rotate diver to look to the left
+   		model_transform = model_transform.times(Mat4.rotation( 50 * Math.PI / 180, Vec.of(1,0,0))); // make him lean forward 90
+
+	
+		model_transform = model_transform.times(Mat4.translation([0, 3 + 5 * time4, 0.4 * Math.sin(  3 * this.t)])); // make diver swim a little up and down 0.2
+    	this.draw_diver(graphics_state, model_transform, 2,1,1); // diver is waving
+
+   	}
+
+  }
+
+
+  if(diver_goes_up > 0){
+  	let time5 = this.t - 46; 
+  	if (time5 < 5) {
+  		graphics_state.camera_transform = Mat4.look_at(  Vec.of(0,5 * time5,30), Vec.of(0,5 * time5,0), Vec.of( 0,1,0 ) );
+	  	}
+  	if (time5 >= 5 & time5 < 10 ){ // camera goes away for another five seconds, shows diver
+	 graphics_state.camera_transform = Mat4.look_at(  Vec.of(2 * (time5-5) ,25+5 * (time5-5), 30 + 5 * (time5 - 5)), Vec.of( 2 * (time5-5) ,25 + 5 * (time5-5),0), Vec.of( 0,1,0));
+  	}
+  	
+  	else if(time >= 10) { //camera stays in place and shows diver
+  		graphics_state.camera_transform = Mat4.look_at(  Vec.of(10,50,30), Vec.of(10,50,0),  Vec.of( 0,1,0 )); // time = 10
+  	} 
+
+  	model_transform = Mat4.identity();
+  	model_transform = model_transform.times(Mat4.translation([0, 3 + 5 * time5, 0]));
+  	model_transform = model_transform.times(Mat4.rotation( 90 * Math.PI / 180, Vec.of(0,1,0)));  //rotate diver to look to the right
+  // 	model_transform = model_transform.times(Mat4.rotation( 50 * Math.PI / 180, Vec.of(1,0,0))); // make him lean forward 90
+
+//	model_transform = model_transform.times(Mat4.translation([0, 5 * time4, 0.4 * Math.sin(  3 * this.t)])); // make diver swim a little up and down 0.2
+
+    this.draw_diver(graphics_state, model_transform, 1,1,1); // diver is not waving
+
+
+    model_transform = Mat4.identity();
+    model_transform = model_transform.times(Mat4.translation( [10 + 20,50+ 15,0] ));  // go a little beyond the middle of where the camera is
+  	model_transform = model_transform.times(Mat4.rotation( -90 * Math.PI / 180, Vec.of(0,1,0)));  //rotate diver to look to the left
+   	model_transform = model_transform.times(Mat4.rotation( 20 * Math.PI / 180, Vec.of(1,0,0))); // make him lean forward 90
+   	this.draw_diver(graphics_state, model_transform, 1,2,1);
+
+    // draw girl diver
+  }  
+
+  if( divers_say_hello > 0){
+  	graphics_state.camera_transform = Mat4.look_at(  Vec.of(-25,30,30), Vec.of(0,30,0),  Vec.of( 0,1,0 ));
+  	model_transform = Mat4.identity();
+
+  	let time6 = this.t - 58; 
+  	//first 3 seconds the guy waves
+  
+  		// draw guy
+	model_transform = Mat4.identity();
+  	model_transform = model_transform.times(Mat4.translation([-8, 35 , 0]));
+  	model_transform = model_transform.times(Mat4.rotation( 90 * Math.PI / 180, Vec.of(0,1,0)));  //rotate diver to look to the right
+	model_transform = model_transform.times(Mat4.translation([0, 0.4 * Math.sin(  3 * this.t), 0])); // make diver swim a little up and down 0.2
+  // 	if(time6 < 4)
+		this.draw_diver(graphics_state, model_transform, 2,1,1); // diver is  wavin	
+//	if(time6 >= 4)
+//		this.draw_diver(graphics_state, model_transform, 1,1,1); // diver is not wavin	
+  	// draw girl
+	model_transform = Mat4.identity();
+	model_transform = model_transform.times(Mat4.translation( [8,35,0] ));  // go a little beyond the middle of where the camera is
+	model_transform = model_transform.times(Mat4.translation([0, 0.4 * Math.sin(  3 * this.t), 0])); // make diver swim a little up and down 0.2
+	model_transform = model_transform.times(Mat4.rotation( -90 * Math.PI / 180, Vec.of(0,1,0)));  //rotate diver to look to the left
+	if(time6 < 2)
+		this.draw_diver(graphics_state, model_transform, 1,2,1); // girl diver is not waving
+	if(time6 >= 2)
+		this.draw_diver(graphics_state, model_transform, 2,2,1); //shes wavinggg
+  	
+  }
+
+ if(final_scene > 0){
+ 	let time7 = this.t - 64; 
+
+ 	graphics_state.camera_transform = Mat4.look_at(  Vec.of(25,50,30), Vec.of(0,50,0),  Vec.of( 0,1,0 ));
+ 	model_transform = Mat4.identity();
+ 	model_transform = model_transform.times(Mat4.translation([-4.5 + 3 * time7, 50 + 3 * time7 , 0]));
+ 	model_transform = model_transform.times(Mat4.translation([0, 0.4 * Math.sin(  3 * this.t), 0])); // make diver swim a little up and down 0.2
+  	model_transform = model_transform.times(Mat4.rotation( 180 * Math.PI / 180, Vec.of(0,1,0)));  //rotate diver to look back
+  	model_transform = model_transform.times(Mat4.rotation( 50 * Math.PI / 180, Vec.of(1,0,0))); // make him lean forward 90
+	this.draw_diver(graphics_state, model_transform, 1,1,2); // guy diver holds hand
+
+	model_transform = Mat4.identity();
+ 	model_transform = model_transform.times(Mat4.translation([4.5 + 3 * time7, 50 + 3 * time7 , 0]));
+ 	model_transform = model_transform.times(Mat4.translation([0, 0.4 * Math.sin(  3 * this.t), 0])); // make diver swim a little up and down 0.2
+  	model_transform = model_transform.times(Mat4.rotation( 180 * Math.PI / 180, Vec.of(0,1,0)));  //rotate diver to look back
+  	model_transform = model_transform.times(Mat4.rotation( 50 * Math.PI / 180, Vec.of(1,0,0))); // make him lean forward 90
+	this.draw_diver(graphics_state, model_transform, 1,2,2); // gal diver holds hand
+
+	if(time7 > 12) {
+		// divers are not there anymore!
+		//bring puffer to the middle
+		model_transform = Mat4.identity();
+		model_transform = model_transform.times(Mat4.translation([-6,9,4]));
+		model_transform = model_transform.times(Mat4.translation([ 5 * (time7-12), 25 + 5 * (time7-12) , 0]));
+		model_transform = model_transform.times(Mat4.rotation(0.5  *Math.sin( - 5 * this.t), Vec.of(1,1,0)));
+
+		this.draw_puffer(graphics_state, model_transform);
+
+		//END !!!
+	}
+
+ 	}
+
+/*  model_transform = Mat4.identity();
+       model_transform = model_transform.times(Mat4.translation([ 3,0,0]));
+       this.draw_bubble(graphics_state, model_transform, 0.9);
+       model_transform = Mat4.identity();
+       model_transform = model_transform.times(Mat4.translation([ 4,1,0]));
+       this.draw_bubble(graphics_state, model_transform, 1);
+       model_transform = Mat4.identity();
+       model_transform = model_transform.times(Mat4.translation([ 3,0,0]));
+       this.draw_bubble(graphics_state, model_transform, 0.5);
+       model_transform = Mat4.identity();
+       model_transform = model_transform.times(Mat4.translation([ 2,2,0]));
+       this.draw_bubble(graphics_state, model_transform, 0.6);
+       model_transform = Mat4.identity();
+       model_transform = model_transform.times(Mat4.translation([ -1,-1,1]));
+       this.draw_bubble(graphics_state, model_transform, 0.7); */
+
+
+ 
+
+
+  model_transform = Mat4.identity();
+     model_transform = model_transform.times(Mat4.translation([ 0,-10,0]));
+     model_transform = model_transform.times(Mat4.scale( [200,0.1,200]));
+     this.shapes.cube.draw(graphics_state, model_transform, this.sand);
+
+
+ 
+    // draw background
+      model_transform = Mat4.identity();
+      model_transform = model_transform.times(Mat4.scale([150,150,150]));
+      this.shapes.sphere.draw(graphics_state, model_transform, this.water);
+
+
+
+
+
+
+    }
+}
+</script>
+<style>
+  table { border-collapse: collapse; display:block; overflow-x: auto; }
+  table, th, td { border: 2px solid black; vertical-align: top; white-space: nowrap }
+  th, td { overflow: hidden;  }
+  button { position: relative; background-color: #4C9F50; color: white; padding: 6px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2); transition: background-color .3s, transform .3s }
+  button:hover, button:focus { transform: scale(1.2); color:gold }
+  .dropdown { display:inline-block }
+  .dropdown-content { display: none; position: absolute; background-color: #f9f9f9; min-width: 100px; overflow: auto; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2) }
+  .dropdown-content a { color: black; padding: 4px 4px; display: block }
+  .dropdown a:hover { background-color: #f1f1f1 }
+  .show { display:inline-block }
+</style>
+</head><body>
+<div id="explanation_section"></div>
+<div id="canvases"></div>
+<table id="control_buttons" class="dropdown" style="display:block; width: 70%;  border: 0px; margin: 0 0 50px 0"><tr></tr></table>
+<div id="code_panel" style="font-family: monospace; white-space: pre; margin: 50px 0" >
+  <div id="code_display"  data-displayed="" ></div>
+  <button id="edit_button" style="display:none">Start editing</button> 
+  <table id="class_list" class="dropdown" style="display:block; border: 0px; border-spacing: 10px " >
+    <tr><td colspan="2">Click below to navigate through all classes that are defined. <br>&nbsp;<br>Main demo: <span name="main_demo_link"></span></td></tr>
+    <tr style="text-align:center"><td>tinywebgl-ucla.js</td><td>dependencies.js</td></tr><tr></tr></table>
+</div>
+<form name="new_demo_source_code" style="display:none">  
+  <p style="margin: 50px 0"><i><b>What can I put here?</b></i>  A JavaScript class, with any valid JavaScript inside.  Your code can use classes from this demo, or from ANY demo on the 
+  encyclopedia of code --  the dependencies will automatically be pulled in to run your demo!<br></p>
+  <textarea rows="30" cols="140" name="new_demo_code"></textarea><br>
+  <div id="submit_result" style="margin: 10px 0"></div>
+  <button type="submit" style="margin: 0px 50px 0px 0px">Save as new webpage</button> 
+  <input type="text" name="author"   placeholder="Author name">
+  <input type="text" name="password" placeholder="Password" style="display:none">
+  <span id="overwrite_panel" style="display:none"><label>Overwrite?<input type="checkbox" name="overwrite" autocomplete="off"></label></span>
+  <span id="beginner_panel"><label>Beginner Mode<input type="checkbox" checked onchange="document.querySelector('#expert_panel').style.display='block'; beginner_panel.style.display='none'"></label></span>
+  <div id="expert_panel" style="display:none;"><label><input type="checkbox" name="finished" autocomplete="off">
+    Optional:  This demo is finished; consider it for public listing on the main page.  
+    I believe that this demo is the one true way to minimalistically do what its name says.
+    The code's readability and structure are so good as to maximize how easy it is to memorize it.
+    </label></div>  
+</form>
+</body></html>
